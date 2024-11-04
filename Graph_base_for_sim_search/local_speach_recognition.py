@@ -29,7 +29,7 @@ pipe = pipeline(
 )
 
 
-def recognize_audio(file_path: str) -> pd.DataFrame:
+def recognize_audio_local(file_path: str) -> pd.DataFrame:
     with torch.inference_mode():
           result = pipe(file_path, generate_kwargs={"num_beams": 5})
     gc.collect()

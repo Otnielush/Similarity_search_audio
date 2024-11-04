@@ -1,8 +1,13 @@
 
-from datasets import load_dataset, Dataset
 import os
 import pandas as pd
 from tqdm.auto import tqdm
+from dotenv import load_dotenv
+
+import requests
+
+load_dotenv()
+api_key_ASR = os.getenv("lemonfox_API_KEY")
 
 
 def reorder_text(df, time_step=120):
@@ -24,6 +29,21 @@ def reorder_text(df, time_step=120):
     return pd.DataFrame(new, columns=['start', 'end', 'text'])
 
 
+def recognize_audio_api(file_path) -> pd.DataFrame:
+    url = "https://api.lemonfox.ai/v1/audio/transcriptions"
+    headers = {"Authorization": "Bearer " + api_key_ASR}
+    data = {"response_format": "verbose_json"}
+    
+    audio_file = open(file_path, "rb")
+    try:
+        response = requests.post(url, headers=headers, files={'file': audio_file}, data=data).json()
+    except:
+        return pd.DataFrame()
+    ds = pd.DataFrame()    
+    ds['start'] = [r['start'] for r in response['segments']]
+    ds['end'] = [r['end'] for r in response['segments']]
+    ds['text'] = [r['text'] for r in response['segments']]
+    return ds
 
 
 
@@ -40,32 +60,11 @@ if __name__ == '__main__':
      
 
      if args.local_model:
-          from local_speach_recognition import recognize_audio
+        from local_speach_recognition import recognize_audio_local as recognize_audio
           
-
      else:
-          from dotenv import load_dotenv
-          load_dotenv()
-          api_key = os.getenv("lemonfox_API_KEY")
-          assert api_key is None, 'Please add lemonfox API key to .env'
+        recognize_audio = recognize_audio_api
 
-          import requests
-          url = "https://api.lemonfox.ai/v1/audio/transcriptions"
-          headers = {"Authorization": "Bearer " + api_key}
-          data = {"response_format": "verbose_json"}
-
-
-          def recognize_audio(file_path) -> pd.DataFrame:
-               audio_file = open(file_path, "rb")
-               try:
-                    response = requests.post(url, headers=headers, files={'file': audio_file}, data=data).json()
-               except:
-                    return pd.DataFrame()
-               ds = pd.DataFrame()    
-               ds['start'] = [r['start'] for r in response['segments']]
-               ds['end'] = [r['end'] for r in response['segments']]
-               ds['text'] = [r['text'] for r in response['segments']]
-               return ds
 
      if args.output_folder != '':
           os.makedirs(args.output_folder, exist_ok=True)
@@ -77,7 +76,8 @@ if __name__ == '__main__':
           ds = recognize_audio(path)
           if len(ds) == 0:
                continue
-
+          
+          ds = ds[ds['text'].notna()]
           ds = reorder_text(ds, time_step=args.interval)
 
           file_name = os.path.splitext(os.path.basename(path))[0] + ".csv"
