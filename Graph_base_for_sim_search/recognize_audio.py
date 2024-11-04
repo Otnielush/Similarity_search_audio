@@ -3,10 +3,6 @@ from datasets import load_dataset, Dataset
 import os
 import pandas as pd
 from tqdm.auto import tqdm
-import time
-
-import re
-
 
 
 def reorder_text(df, time_step=120):
@@ -36,22 +32,57 @@ if __name__ == '__main__':
 
      parser = ArgumentParser()
      parser.add_argument("--local_model", '-l', action='store_true', help="If passed uses downloads model and runs local recognition, otherwise sends data to API")
-     parser.add_argument("--link", "-l", type=str, default='')
-     parser.add_argument("--output_folder", "-o", type=str, required=True)
-     parser.add_argument("--verbose", action='store_true')
+     parser.add_argument("--paths", nargs='+')
+     parser.add_argument("--interval", type=int, default=120)
+     parser.add_argument("--output_folder", "-o", type=str, default='')
      
      args = parser.parse_args()
-     assert args.file != '' or args.link != '', "Need to pass or --file (-f) or --link (-l)"
-
+     
 
      if args.local_model:
-
-
-
-
+          from local_speach_recognition import recognize_audio
+          
 
      else:
           from dotenv import load_dotenv
           load_dotenv()
+          api_key = os.getenv("lemonfox_API_KEY")
+          assert api_key is None, 'Please add lemonfox API key to .env'
+
+          import requests
+          url = "https://api.lemonfox.ai/v1/audio/transcriptions"
+          headers = {"Authorization": "Bearer " + api_key}
+          data = {"response_format": "verbose_json"}
 
 
+          def recognize_audio(file_path) -> pd.DataFrame:
+               audio_file = open(file_path, "rb")
+               try:
+                    response = requests.post(url, headers=headers, files={'file': audio_file}, data=data).json()
+               except:
+                    return pd.DataFrame()
+               ds = pd.DataFrame()    
+               ds['start'] = [r['start'] for r in response['segments']]
+               ds['end'] = [r['end'] for r in response['segments']]
+               ds['text'] = [r['text'] for r in response['segments']]
+               return ds
+
+     if args.output_folder != '':
+          os.makedirs(args.output_folder, exist_ok=True)
+          
+     prog = tqdm(args.paths)
+     for path in prog:
+          prog.set_description(os.path.basename(path)[:40])
+
+          ds = recognize_audio(path)
+          if len(ds) == 0:
+               continue
+
+          ds = reorder_text(ds, time_step=args.interval)
+
+          file_name = os.path.splitext(os.path.basename(path))[0] + ".csv"
+          if args.output_folder == '':
+               file_name = os.path.join(os.path.dirname(path), file_name)
+          else:
+               file_name = os.path.join(args.output_folder, file_name)
+          ds.to_csv(file_name, index=False)
